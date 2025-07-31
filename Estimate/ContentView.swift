@@ -1,770 +1,841 @@
-//
-//  ContentView.swift
-//  Estimate
-//
-//  Created by Prabhnoor Singh on 7/29/25.
-//
-
 import SwiftUI
-import AVFoundation
-import CoreML
-import Vision
-import Combine
+import PhotosUI
 
-// MARK: - Color Palette
+// MARK: - Data Models
+struct Message: Identifiable {
+    let id = UUID()
+    let text: String
+    let isUser: Bool
+    let timestamp = Date()
+}
+
+struct DIYStep: Identifiable, Equatable {
+    let id = UUID()
+    let title: String
+    let description: String
+    let time: String
+    var isCompleted: Bool = false
+}
+
+// MARK: - Predefined Responses
+struct PredefinedResponses {
+    static let initial = "That sounds stressful! Water leaks can definitely cause anxiety. Let me help you figure this out. Can you show me a photo of where the water is coming from? This will help me give you the most accurate advice."
+    
+    static let diagnosis = DiagnosisInfo(
+        title: "Supply Line Leak",
+        icon: "🔧",
+        time: "20-30 min",
+        difficulty: "Easy",
+        cost: "$5-15",
+        description: "Good news! This is a common issue that's actually pretty simple to fix yourself. The supply line is just the flexible tube that connects your water valve to your faucet. You'll just need some towels and possibly a new supply line from the hardware store."
+    )
+    
+    static let afterDiagnosis = "So this is definitely fixable! What would be most helpful right now?"
+    
+    static let proQuote = ProQuote(
+        laborCost: "$120-150",
+        partsCost: "$30-50",
+        totalRange: "$150-200",
+        time: "1-2 hours",
+        description: "This includes the plumber's diagnostic fee, labor, and parts. Most plumbers have a minimum charge of about $100-150 just to come out."
+    )
+    
+    static let steps = [
+        DIYStep(
+            title: "Turn off the water valve under the sink",
+            description: "Look for a knob or lever and turn it clockwise (righty-tighty). This stops water flow immediately.",
+            time: "1 minute"
+        ),
+        DIYStep(
+            title: "Place towels or a bucket under the leak",
+            description: "This catches any remaining water. Don't worry if it's still dripping a bit - that's just water left in the pipes.",
+            time: "2 minutes"
+        ),
+        DIYStep(
+            title: "Check if it's the connection or the line itself",
+            description: "If water is coming from where the line connects, try tightening it by hand. If the line has a hole, you'll need a replacement ($5-10 at any hardware store).",
+            time: "2 minutes"
+        ),
+        DIYStep(
+            title: "Optional: Replace the supply line",
+            description: "Unscrew the old line (lefty-loosey), take it to the hardware store to match size, and screw in the new one. Hand-tight plus 1/4 turn with pliers.",
+            time: "15-20 minutes including store trip"
+        )
+    ]
+    
+    static let encouragement = "You're doing great! You just saved yourself about $150-200 in plumber fees. If you run into any issues, I'm here to help!"
+}
+
+struct DiagnosisInfo {
+    let title: String
+    let icon: String
+    let time: String
+    let difficulty: String
+    let cost: String
+    let description: String
+}
+
+struct ProQuote {
+    let laborCost: String
+    let partsCost: String
+    let totalRange: String
+    let time: String
+    let description: String
+}
+
+// MARK: - Color Extensions
 extension Color {
-    static let terracotta = Color(red: 234/255, green: 88/255, blue: 12/255)
     static let warmCream = Color(red: 254/255, green: 243/255, blue: 199/255)
+    static let terracotta = Color(red: 234/255, green: 88/255, blue: 12/255)
     static let forestGreen = Color(red: 5/255, green: 150/255, blue: 105/255)
     static let softWhite = Color(red: 255/255, green: 251/255, blue: 245/255)
     static let clayBrown = Color(red: 146/255, green: 64/255, blue: 14/255)
-    static let sunsetPink = Color(red: 248/255, green: 113/255, blue: 113/255)
 }
 
-// MARK: - Font Extensions
-extension Font {
-    static let friendlyTitle = Font.system(size: 24, weight: .medium, design: .rounded)
-    static let warmBody = Font.system(size: 17, weight: .regular, design: .rounded)
-    static let encouragingCallout = Font.system(size: 16, weight: .medium, design: .rounded)
-}
-
-// MARK: - Content View
+// MARK: - Main View
 struct ContentView: View {
-    @StateObject private var viewModel = MidnightLeakViewModel()
+    @State private var currentScreen = 1
+    @State private var messages: [Message] = []
+    @State private var userInput = ""
+    @State private var showTyping = false
+    @State private var capturedImage: UIImage?
+    @State private var showCamera = false
+    @State private var showQuickOptions = false
+    @State private var diySteps: [DIYStep] = PredefinedResponses.steps
+    @State private var completedSteps = 0
+    @State private var showEncouragement = false
+    @State private var isRecording = false
     
     var body: some View {
-        NavigationStack {
-            ZStack {
-                // Warm gradient background
-                LinearGradient(
-                    colors: [Color.warmCream, Color.softWhite],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .ignoresSafeArea()
-                
-                VStack {
-                    switch viewModel.currentState {
-                    case .initial:
-                        EntryPointView(viewModel: viewModel)
-                    case .capturingPhoto:
-                        CameraView(viewModel: viewModel)
-                    case .diagnosing:
-                        DiagnosingView()
-                    case .showingDiagnosis:
-                        DiagnosisView(viewModel: viewModel)
-                    case .choosingAction:
-                        ActionChoiceView(viewModel: viewModel)
-                    case .connectingContractor:
-                        ContractorConnectionView(viewModel: viewModel)
-                    }
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Entry Point View
-struct EntryPointView: View {
-    @ObservedObject var viewModel: MidnightLeakViewModel
-    @State private var isPressed = false
-    
-    var body: some View {
-        VStack(spacing: 40) {
-            Spacer()
-            
-            // Warm illustration placeholder
-            Image(systemName: "house.fill")
-                .font(.system(size: 80))
-                .foregroundColor(.terracotta.opacity(0.3))
-                .padding(.bottom, 20)
-            
-            Text("Your home repair companion.\nAlways on your side.")
-                .font(.friendlyTitle)
-                .foregroundColor(.clayBrown)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-            
-            Spacer()
-            
-            // Main panic button
-            Button(action: {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                    viewModel.startEmergencyFlow()
-                }
-            }) {
-                Text("Something's Wrong With My Home")
-                    .font(.system(size: 20, weight: .semibold, design: .rounded))
-                    .foregroundColor(.softWhite)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 60)
-                    .background(Color.terracotta)
-                    .cornerRadius(30)
-                    .shadow(color: Color.terracotta.opacity(0.3), radius: 12, x: 0, y: 4)
-                    .scaleEffect(isPressed ? 0.95 : 1.0)
-            }
-            .padding(.horizontal, 40)
-            .onLongPressGesture(minimumDuration: .infinity, maximumDistance: .infinity) { isPressing in
-                withAnimation(.easeInOut(duration: 0.1)) {
-                    isPressed = isPressing
-                }
-            } perform: {}
-            
-            Text("24/7 help • Visual diagnosis • Trusted contractors")
-                .font(.caption)
-                .foregroundColor(.clayBrown.opacity(0.7))
-                .padding(.top, 10)
-            
-            Spacer()
-        }
-    }
-}
-
-// MARK: - Camera View
-struct CameraView: View {
-    @ObservedObject var viewModel: MidnightLeakViewModel
-    @State private var image: UIImage?
-    @State private var showingImagePicker = true
-    
-    var body: some View {
-        VStack(spacing: 30) {
-            // Reassuring message
-            MessageBubble(
-                message: "Hi, I'm here to help. Take a deep breath. Let's figure this out together.\n\nCan you show me what's happening?",
-                isFromAssistant: true
+        ZStack {
+            // Background gradient
+            LinearGradient(
+                colors: [Color.warmCream, Color.softWhite],
+                startPoint: .top,
+                endPoint: .bottom
             )
+            .ignoresSafeArea()
             
-            Spacer()
-            
-            if let image = image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxHeight: 300)
-                    .cornerRadius(20)
-                    .shadow(radius: 10)
-                
-                Button(action: {
-                    viewModel.analyzeImage(image)
-                }) {
-                    Text("Analyze This")
-                        .font(.encouragingCallout)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 52)
-                        .background(Color.forestGreen)
-                        .cornerRadius(26)
+            VStack(spacing: 0) {
+                // Dynamic content based on screen
+                switch currentScreen {
+                case 1:
+                    InitialGreetingScreen(
+                        messages: $messages,
+                        userInput: $userInput,
+                        showTyping: $showTyping,
+                        currentScreen: $currentScreen,
+                        isRecording: $isRecording
+                    )
+                case 2:
+                    PhotoOptionsScreen(
+                        messages: $messages,
+                        currentScreen: $currentScreen,
+                        showCamera: $showCamera,
+                        capturedImage: $capturedImage
+                    )
+                case 3:
+                    CameraScreen(
+                        capturedImage: $capturedImage,
+                        currentScreen: $currentScreen
+                    )
+                case 4:
+                    AnalyzingScreen(
+                        currentScreen: $currentScreen
+                    )
+                case 5:
+                    DiagnosisScreen(
+                        messages: $messages,
+                        currentScreen: $currentScreen,
+                        showQuickOptions: $showQuickOptions,
+                        userInput: $userInput,
+                        showTyping: $showTyping,
+                        isRecording: $isRecording
+                    )
+                case 6:
+                    DIYStepsScreen(
+                        steps: $diySteps,
+                        completedSteps: $completedSteps,
+                        showEncouragement: $showEncouragement
+                    )
+                default:
+                    InitialGreetingScreen(
+                        messages: $messages,
+                        userInput: $userInput,
+                        showTyping: $showTyping,
+                        currentScreen: $currentScreen,
+                        isRecording: $isRecording
+                    )
                 }
-                .padding(.horizontal, 40)
-            } else {
-                // Camera button
-                Button(action: {
-                    showingImagePicker = true
-                }) {
-                    VStack(spacing: 20) {
-                        Image(systemName: "camera.fill")
-                            .font(.system(size: 50))
-                            .foregroundColor(.terracotta)
-                        
-                        Text("Point at the problem")
-                            .font(.warmBody)
-                            .foregroundColor(.clayBrown)
+            }
+        }
+        .sheet(isPresented: $showCamera) {
+            ImagePicker(image: $capturedImage)
+                .onDisappear {
+                    if capturedImage != nil {
+                        currentScreen = 4
+                        // Simulate analysis
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            currentScreen = 5
+                            showQuickOptions = true
+                        }
                     }
-                    .frame(width: 200, height: 200)
-                    .background(Color.warmCream)
-                    .cornerRadius(20)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20)
-                            .strokeBorder(Color.terracotta.opacity(0.3), lineWidth: 2)
-                    )
                 }
-            }
-            
-            Spacer()
-        }
-        .padding()
-        .sheet(isPresented: $showingImagePicker) {
-            ImagePicker(image: $image, sourceType: .camera)
         }
     }
 }
 
-// MARK: - Diagnosing View
-struct DiagnosingView: View {
-    @State private var dots = ""
+// MARK: - Screen 1: Initial Greeting
+struct InitialGreetingScreen: View {
+    @Binding var messages: [Message]
+    @Binding var userInput: String
+    @Binding var showTyping: Bool
+    @Binding var currentScreen: Int
+    @Binding var isRecording: Bool
+    @FocusState private var isInputFocused: Bool
+    @State private var inputText = ""
+    @State private var isPulsing = true
     
     var body: some View {
-        VStack(spacing: 30) {
-            Spacer()
-            
-            // Animated loading indicator
-            ProgressView()
-                .scaleEffect(1.5)
-                .tint(.terracotta)
-            
-            Text("Analyzing\(dots)")
-                .font(.friendlyTitle)
-                .foregroundColor(.clayBrown)
-            
-            Text("I'm looking at what's happening")
-                .font(.warmBody)
-                .foregroundColor(.clayBrown.opacity(0.7))
-            
-            Spacer()
-        }
-        .onAppear {
-            Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-                dots = dots.count < 3 ? dots + "." : ""
-            }
-        }
-    }
-}
-
-// MARK: - Diagnosis View
-struct DiagnosisView: View {
-    @ObservedObject var viewModel: MidnightLeakViewModel
-    
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                // Immediate acknowledgment
-                MessageBubble(
-                    message: "I can see that's stressful! Let me help you right away.",
-                    isFromAssistant: true
-                )
-                
-                // Emergency instructions
-                VStack(alignment: .leading, spacing: 15) {
-                    Text("First, let's make sure you're safe:")
-                        .font(.encouragingCallout)
-                        .foregroundColor(.clayBrown)
-                    
-                    EmergencyStepCard(
-                        icon: "drop.triangle.fill",
-                        title: "Turn off water valve",
-                        description: "Look under the sink for the shutoff valve",
-                        action: "Show diagram"
-                    )
-                    
-                    Text("This will stop it from getting worse. You're doing great.")
-                        .font(.warmBody)
-                        .foregroundColor(.forestGreen)
-                        .padding(.horizontal)
-                }
-                .padding(.vertical)
-                
-                // Diagnosis details
-                DiagnosisCard(
-                    issue: "Supply Line Leak",
-                    severity: .moderate,
-                    cost: "$150-300",
-                    timeToFix: "1-2 hours",
-                    description: "Super common, happens to everyone"
-                )
-                
-                // Next steps
-                Text("What would help you most right now?")
-                    .font(.friendlyTitle)
+        VStack(spacing: 0) {
+            // Header
+            VStack(spacing: 8) {
+                Text("👋 Hi Amanda, what's going on at home?")
+                    .font(.title2)
+                    .fontWeight(.medium)
                     .foregroundColor(.clayBrown)
-                    .padding(.top, 30)
+                    .multilineTextAlignment(.center)
                     .padding(.horizontal)
+            }
+            .padding(.top, 60)
+            .padding(.bottom, 20)
+            
+            // Chat container
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 16) {
+                        ForEach(messages) { message in
+                            MessageBubble(message: message)
+                                .id(message.id)
+                        }
+                        
+                        if showTyping {
+                            TypingIndicator()
+                        }
+                    }
+                    .padding()
+                }
+                .onChange(of: messages.count) { _ in
+                    withAnimation {
+                        proxy.scrollTo(messages.last?.id, anchor: .bottom)
+                    }
+                }
+            }
+            
+            // Input area
+            VStack(spacing: 0) {
+                Divider()
                 
+                HStack(spacing: 12) {
+                    TextField("Type your message...", text: $inputText)
+                        .textFieldStyle(PlainTextFieldStyle())
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 16)
+                        .background(Color.warmCream)
+                        .cornerRadius(25)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 25)
+                                .stroke(isPulsing ? Color.terracotta.opacity(0.3) : Color.clear, lineWidth: 2)
+                                .scaleEffect(isPulsing ? 1.02 : 1)
+                                .animation(isPulsing ? .easeInOut(duration: 2).repeatForever(autoreverses: true) : .default, value: isPulsing)
+                        )
+                        .focused($isInputFocused)
+                        .onSubmit {
+                            if !inputText.isEmpty {
+                                handleUserInput(inputText)
+                            }
+                        }
+                    
+                    Button(action: {
+                        isRecording.toggle()
+                        if !isRecording {
+                            // Simulate voice input
+                            inputText = "I've got water leaking under my kitchen sink"
+                            isInputFocused = true
+                        }
+                    }) {
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(isRecording ? Color.red : Color.terracotta)
+                            .clipShape(Circle())
+                            .scaleEffect(isRecording ? 1.1 : 1)
+                            .animation(.easeInOut(duration: 0.3), value: isRecording)
+                    }
+                }
+                .padding()
+                .background(Color.white)
+            }
+        }
+    }
+    
+    private func handleUserInput(_ text: String) {
+        isPulsing = false
+        userInput = text
+        inputText = ""
+        
+        // Add user message
+        messages.append(Message(text: text, isUser: true))
+        
+        // Show typing
+        showTyping = true
+        
+        // Simulate response
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            showTyping = false
+            messages.append(Message(text: PredefinedResponses.initial, isUser: false))
+            
+            // Move to photo options after a delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                currentScreen = 2
+            }
+        }
+    }
+}
+
+// MARK: - Screen 2: Photo Options
+struct PhotoOptionsScreen: View {
+    @Binding var messages: [Message]
+    @Binding var currentScreen: Int
+    @Binding var showCamera: Bool
+    @Binding var capturedImage: UIImage?
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Chat container
+            ScrollView {
+                VStack(spacing: 16) {
+                    ForEach(messages) { message in
+                        MessageBubble(message: message)
+                    }
+                }
+                .padding()
+            }
+            
+            // Options
+            HStack(spacing: 16) {
                 Button(action: {
-                    viewModel.currentState = .choosingAction
+                    showCamera = true
                 }) {
-                    Text("See my options")
-                        .font(.encouragingCallout)
+                    Label("Take Photo", systemImage: "camera.fill")
+                        .font(.system(size: 16, weight: .medium))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 52)
-                        .background(Color.terracotta)
-                        .cornerRadius(26)
+                        .padding(.vertical, 16)
+                        .background(Color.forestGreen)
+                        .cornerRadius(20)
                 }
-                .padding(.horizontal)
+                
+                Button(action: {
+                    // Handle text description
+                }) {
+                    Text("Just Describe")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.clayBrown)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(Color.warmCream)
+                        .cornerRadius(20)
+                }
             }
-            .padding(.vertical)
+            .padding()
+            .background(Color.white)
         }
     }
 }
 
-// MARK: - Action Choice View
-struct ActionChoiceView: View {
-    @ObservedObject var viewModel: MidnightLeakViewModel
+// MARK: - Screen 3: Camera
+struct CameraScreen: View {
+    @Binding var capturedImage: UIImage?
+    @Binding var currentScreen: Int
+    @State private var showCamera = true
+    
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            
+            VStack {
+                Text("Point at the problem and snap a photo")
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+                    .background(Color.black.opacity(0.5))
+                    .cornerRadius(16)
+                    .padding(.top, 60)
+                
+                Spacer()
+                
+                Image(systemName: "camera.fill")
+                    .font(.system(size: 100))
+                    .foregroundColor(.white.opacity(0.3))
+                
+                Spacer()
+                
+                Button(action: {
+                    // Camera capture handled by ImagePicker
+                }) {
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 80, height: 80)
+                        .overlay(
+                            Circle()
+                                .stroke(Color.terracotta, lineWidth: 4)
+                                .frame(width: 72, height: 72)
+                        )
+                }
+                .padding(.bottom, 40)
+            }
+        }
+        .sheet(isPresented: $showCamera) {
+            ImagePicker(image: $capturedImage)
+        }
+    }
+}
+
+// MARK: - Screen 4: Analyzing
+struct AnalyzingScreen: View {
+    @Binding var currentScreen: Int
+    @State private var rotation: Double = 0
     
     var body: some View {
         VStack(spacing: 20) {
-            Text("What would help you most right now?")
-                .font(.friendlyTitle)
-                .foregroundColor(.clayBrown)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-                .padding(.top, 40)
-            
             Spacer()
             
-            // Option cards
-            OptionCard(
-                icon: "wrench.and.screwdriver.fill",
-                title: "Connect me with someone who can fix this tomorrow",
-                color: .forestGreen
-            ) {
-                viewModel.currentState = .connectingContractor
-            }
+            // Spinner
+            Circle()
+                .stroke(Color.warmCream, lineWidth: 4)
+                .frame(width: 60, height: 60)
+                .overlay(
+                    Circle()
+                        .trim(from: 0, to: 0.3)
+                        .stroke(Color.terracotta, lineWidth: 4)
+                        .rotationEffect(Angle(degrees: rotation))
+                        .onAppear {
+                            withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+                                rotation = 360
+                            }
+                        }
+                )
             
-            OptionCard(
-                icon: "book.fill",
-                title: "Show me how to temporarily patch this myself",
-                color: .terracotta
-            ) {
-                // DIY flow
-            }
-            
-            OptionCard(
-                icon: "message.fill",
-                title: "I need to talk through my options",
-                color: .sunsetPink
-            ) {
-                // Chat flow
-            }
+            Text("Analyzing your photo...")
+                .font(.system(size: 18))
+                .foregroundColor(.clayBrown)
             
             Spacer()
         }
-        .padding()
     }
 }
 
-// MARK: - Contractor Connection View
-struct ContractorConnectionView: View {
-    @ObservedObject var viewModel: MidnightLeakViewModel
-    @State private var showingSuccess = false
+// MARK: - Screen 5: Diagnosis with Chat
+struct DiagnosisScreen: View {
+    @Binding var messages: [Message]
+    @Binding var currentScreen: Int
+    @Binding var showQuickOptions: Bool
+    @Binding var userInput: String
+    @Binding var showTyping: Bool
+    @Binding var isRecording: Bool
+    @State private var inputText = ""
+    @State private var showDiagnosisCard = true
     
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 25) {
-                MessageBubble(
-                    message: "I found Mike from Chen's Plumbing. He's helped 47 neighbors with exactly this issue.",
-                    isFromAssistant: true
-                )
-                
-                // Contractor card
-                ContractorCard(
-                    name: "Mike Chen",
-                    business: "Chen's Plumbing Solutions",
-                    rating: 4.9,
-                    completedJobs: 47,
-                    availability: "Tomorrow at 10 AM",
-                    price: "$200-250",
-                    profileImage: "person.circle.fill"
-                )
-                
-                Text("The price will be $200-250, which is fair for this repair")
-                    .font(.warmBody)
-                    .foregroundColor(.clayBrown)
-                    .padding(.horizontal)
-                
-                Text("Should I connect you?")
-                    .font(.encouragingCallout)
-                    .foregroundColor(.clayBrown)
-                    .padding(.horizontal)
-                
-                HStack(spacing: 15) {
-                    Button(action: {
-                        withAnimation {
-                            showingSuccess = true
+        VStack(spacing: 0) {
+            // Chat container
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 16) {
+                        if showDiagnosisCard {
+                            DiagnosisCard()
                         }
+                        
+                        Text(PredefinedResponses.afterDiagnosis)
+                            .font(.body)
+                            .foregroundColor(.clayBrown)
+                            .padding()
+                            .background(Color.warmCream)
+                            .cornerRadius(20)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        
+                        ForEach(messages.filter { $0.timestamp > Date().addingTimeInterval(-60) }) { message in
+                            MessageBubble(message: message)
+                        }
+                        
+                        if showTyping {
+                            TypingIndicator()
+                        }
+                    }
+                    .padding()
+                }
+            }
+            
+            // Quick options
+            if showQuickOptions {
+                HStack(spacing: 10) {
+                    Button(action: {
+                        showQuickOptions = false
+                        messages.append(Message(text: "DIY Steps 🔧", isUser: true))
+                        currentScreen = 6
                     }) {
-                        Text("Yes, connect us")
-                            .font(.encouragingCallout)
+                        Label("DIY Steps", systemImage: "wrench.fill")
+                            .font(.system(size: 15, weight: .medium))
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 52)
+                            .padding(.vertical, 12)
                             .background(Color.forestGreen)
-                            .cornerRadius(26)
+                            .cornerRadius(20)
                     }
                     
                     Button(action: {
-                        // Show alternatives
+                        showQuickOptions = false
+                        messages.append(Message(text: "Get Pro Quote 💰", isUser: true))
+                        showProQuote()
                     }) {
-                        Text("Show alternatives")
-                            .font(.encouragingCallout)
-                            .foregroundColor(.terracotta)
+                        Label("Get Pro Quote", systemImage: "dollarsign.circle")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundColor(.clayBrown)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 52)
+                            .padding(.vertical, 12)
                             .background(Color.warmCream)
-                            .cornerRadius(26)
+                            .cornerRadius(20)
                     }
                 }
                 .padding(.horizontal)
+                .padding(.top, 10)
             }
-            .padding(.vertical)
-        }
-        .overlay(
-            Group {
-                if showingSuccess {
-                    SuccessOverlay()
+            
+            // Input area
+            VStack(spacing: 10) {
+                if showQuickOptions {
+                    Text("Or just tell me what's on your mind...")
+                        .font(.system(size: 14))
+                        .foregroundColor(.clayBrown.opacity(0.6))
                 }
+                
+                HStack(spacing: 12) {
+                    TextField("Ask me anything...", text: $inputText)
+                        .textFieldStyle(PlainTextFieldStyle())
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 16)
+                        .background(Color.warmCream)
+                        .cornerRadius(25)
+                        .onSubmit {
+                            if !inputText.isEmpty {
+                                handleDiagnosisInput(inputText)
+                            }
+                        }
+                    
+                    Button(action: {
+                        isRecording.toggle()
+                    }) {
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(isRecording ? Color.red : Color.terracotta)
+                            .clipShape(Circle())
+                    }
+                }
+                .padding()
             }
-        )
+            .background(Color.white)
+        }
+    }
+    
+    private func handleDiagnosisInput(_ text: String) {
+        messages.append(Message(text: text, isUser: true))
+        inputText = ""
+        showTyping = true
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            showTyping = false
+            // Simple response logic based on keywords
+            let response = getResponseForInput(text)
+            messages.append(Message(text: response, isUser: false))
+        }
+    }
+    
+    private func getResponseForInput(_ input: String) -> String {
+        let lowercased = input.lowercased()
+        
+        if lowercased.contains("valve") || lowercased.contains("wrong") {
+            return "No worries! Look for the main shutoff - it's usually a larger valve near where the water line comes into the house. Or just turn off the main water supply temporarily. Better safe than sorry!"
+        } else if lowercased.contains("still leak") || lowercased.contains("still dripping") {
+            return "That's okay! Sometimes it takes a minute for the water to stop completely. If it's still actively flowing, double-check that the valve is turned all the way clockwise. You can also try the main water shutoff."
+        } else if lowercased.contains("scared") || lowercased.contains("worried") || lowercased.contains("nervous") {
+            return "I totally understand - home repairs can feel overwhelming! Remember, you're not going to break anything. Water valves are designed to be turned on and off. Take your time, and I'm here to guide you through each step."
+        } else if lowercased.contains("can't find") || lowercased.contains("where") {
+            return "No problem! Send me a photo of under your sink and I'll help you spot it. In the meantime, you can place a bucket under the leak to catch the water. The valve is usually a small knob or lever connected to the pipes."
+        } else {
+            return "I understand your concern. Let me help you with that. Feel free to ask me anything specific about the repair or if you need clarification on any step."
+        }
+    }
+    
+    private func showProQuote() {
+        // Would show pro quote card in messages
+    }
+}
+
+// MARK: - Screen 6: DIY Steps
+struct DIYStepsScreen: View {
+    @Binding var steps: [DIYStep]
+    @Binding var completedSteps: Int
+    @Binding var showEncouragement: Bool
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            VStack(spacing: 10) {
+                Text("Let's fix this together!")
+                    .font(.title2)
+                    .fontWeight(.medium)
+                    .foregroundColor(.clayBrown)
+                
+                HStack(spacing: 6) {
+                    Image(systemName: "clock.fill")
+                        .font(.system(size: 14))
+                    Text("About 20-30 minutes")
+                        .font(.system(size: 14, weight: .medium))
+                }
+                .foregroundColor(.forestGreen)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.forestGreen.opacity(0.1))
+                .cornerRadius(12)
+            }
+            .padding()
+            
+            // Steps
+            ScrollView {
+                VStack(spacing: 16) {
+                    ForEach(steps.indices, id: \.self) { index in
+                        StepRow(
+                            step: $steps[index],
+                            onToggle: {
+                                if !steps[index].isCompleted {
+                                    steps[index].isCompleted = true
+                                    completedSteps += 1
+                                    
+                                    if completedSteps == steps.count {
+                                        showEncouragement = true
+                                    }
+                                }
+                            }
+                        )
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .opacity
+                        ))
+                        .animation(.easeOut(duration: 0.3).delay(Double(index) * 0.1), value: steps)
+                    }
+                    
+                    if showEncouragement {
+                        EncouragementCard()
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .animation(.spring(), value: showEncouragement)
+                    }
+                }
+                .padding()
+            }
+        }
     }
 }
 
 // MARK: - Supporting Views
 struct MessageBubble: View {
-    let message: String
-    let isFromAssistant: Bool
+    let message: Message
     
     var body: some View {
         HStack {
-            if !isFromAssistant { Spacer() }
+            if message.isUser { Spacer() }
             
-            Text(message)
-                .font(.warmBody)
-                .foregroundColor(isFromAssistant ? .clayBrown : .white)
-                .padding()
-                .background(
-                    isFromAssistant ? Color.warmCream : Color.terracotta
-                )
+            Text(message.text)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(message.isUser ? Color.terracotta : Color.warmCream)
+                .foregroundColor(message.isUser ? .white : .clayBrown)
                 .cornerRadius(20)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .strokeBorder(
-                            isFromAssistant ? Color.terracotta.opacity(0.1) : Color.clear,
-                            lineWidth: 1
-                        )
-                )
+                .frame(maxWidth: 280, alignment: message.isUser ? .trailing : .leading)
             
-            if isFromAssistant { Spacer() }
+            if !message.isUser { Spacer() }
         }
-        .padding(.horizontal)
     }
 }
 
-struct EmergencyStepCard: View {
-    let icon: String
-    let title: String
-    let description: String
-    let action: String
+struct TypingIndicator: View {
+    @State private var animationAmount = 0.0
     
     var body: some View {
-        HStack {
-            Image(systemName: icon)
-                .font(.system(size: 30))
-                .foregroundColor(.terracotta)
-                .frame(width: 50)
-            
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title)
-                    .font(.encouragingCallout)
-                    .foregroundColor(.clayBrown)
-                
-                Text(description)
-                    .font(.caption)
-                    .foregroundColor(.clayBrown.opacity(0.7))
-            }
-            
-            Spacer()
-            
-            Button(action: {
-                // Show diagram
-            }) {
-                Text(action)
-                    .font(.caption)
-                    .foregroundColor(.terracotta)
-                    .underline()
+        HStack(spacing: 4) {
+            ForEach(0..<3) { index in
+                Circle()
+                    .fill(Color.clayBrown)
+                    .frame(width: 8, height: 8)
+                    .offset(y: animationAmount)
+                    .animation(
+                        .easeInOut(duration: 0.5)
+                        .repeatForever()
+                        .delay(Double(index) * 0.2),
+                        value: animationAmount
+                    )
             }
         }
-        .padding()
-        .background(Color.softWhite)
-        .cornerRadius(15)
-        .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
-        .padding(.horizontal)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(Color.warmCream)
+        .cornerRadius(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear {
+            animationAmount = -10
+        }
     }
 }
 
 struct DiagnosisCard: View {
-    let issue: String
-    let severity: Severity
-    let cost: String
-    let timeToFix: String
-    let description: String
-    
-    enum Severity {
-        case low, moderate, high
-        
-        var color: Color {
-            switch self {
-            case .low: return .forestGreen
-            case .moderate: return .terracotta
-            case .high: return .sunsetPink
-            }
-        }
-        
-        var text: String {
-            switch self {
-            case .low: return "Low"
-            case .moderate: return "Moderate"
-            case .high: return "High"
-            }
-        }
-    }
+    let diagnosis = PredefinedResponses.diagnosis
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            HStack {
-                Text(issue)
-                    .font(.friendlyTitle)
-                    .foregroundColor(.clayBrown)
-                
-                Spacer()
-                
-                Label(severity.text, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundColor(severity.color)
-            }
-            
-            Text(description)
-                .font(.warmBody)
-                .foregroundColor(.clayBrown.opacity(0.8))
-            
-            HStack(spacing: 30) {
-                InfoPill(label: "Cost", value: cost, icon: "dollarsign.circle")
-                InfoPill(label: "Time", value: timeToFix, icon: "clock")
-            }
-        }
-        .padding()
-        .background(Color.softWhite)
-        .cornerRadius(20)
-        .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 4)
-        .padding(.horizontal)
-    }
-}
-
-struct InfoPill: View {
-    let label: String
-    let value: String
-    let icon: String
-    
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .foregroundColor(.terracotta)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label)
-                    .font(.caption)
-                    .foregroundColor(.clayBrown.opacity(0.6))
-                
-                Text(value)
-                    .font(.encouragingCallout)
-                    .foregroundColor(.clayBrown)
-            }
-        }
-    }
-}
-
-struct OptionCard: View {
-    let icon: String
-    let title: String
-    let color: Color
-    let action: () -> Void
-    
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 20) {
-                Image(systemName: icon)
-                    .font(.system(size: 30))
-                    .foregroundColor(color)
-                    .frame(width: 50)
-                
-                Text(title)
-                    .font(.warmBody)
-                    .foregroundColor(.clayBrown)
-                    .multilineTextAlignment(.leading)
-                
-                Spacer()
-                
-                Image(systemName: "chevron.right")
-                    .foregroundColor(.clayBrown.opacity(0.3))
-            }
-            .padding()
-            .background(Color.softWhite)
-            .cornerRadius(20)
-            .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
-        }
-        .padding(.horizontal)
-    }
-}
-
-struct ContractorCard: View {
-    let name: String
-    let business: String
-    let rating: Double
-    let completedJobs: Int
-    let availability: String
-    let price: String
-    let profileImage: String
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(spacing: 15) {
-                Image(systemName: profileImage)
-                    .font(.system(size: 60))
-                    .foregroundColor(.terracotta)
-                    .background(Circle().fill(Color.warmCream))
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                Text(diagnosis.icon)
+                    .font(.system(size: 48))
+                    .frame(width: 48, height: 48)
+                    .background(Color.warmCream)
                     .clipShape(Circle())
                 
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(name)
-                        .font(.friendlyTitle)
-                        .foregroundColor(.clayBrown)
-                    
-                    Text(business)
-                        .font(.warmBody)
-                        .foregroundColor(.clayBrown.opacity(0.7))
-                    
-                    HStack(spacing: 5) {
-                        ForEach(0..<5) { i in
-                            Image(systemName: i < Int(rating) ? "star.fill" : "star")
-                                .foregroundColor(.yellow)
-                                .font(.caption)
-                        }
-                        Text(String(format: "%.1f", rating))
-                            .font(.caption)
-                            .foregroundColor(.clayBrown.opacity(0.7))
-                    }
-                }
-                
-                Spacer()
-            }
-            
-            HStack(spacing: 30) {
-                InfoBadge(icon: "checkmark.shield.fill", text: "\(completedJobs) similar repairs", color: .forestGreen)
-                InfoBadge(icon: "clock.fill", text: availability, color: .terracotta)
-            }
-            
-            Divider()
-            
-            HStack {
-                Text("Estimated cost:")
-                    .font(.warmBody)
-                    .foregroundColor(.clayBrown.opacity(0.7))
-                
-                Spacer()
-                
-                Text(price)
-                    .font(.friendlyTitle)
+                Text(diagnosis.title)
+                    .font(.system(size: 20, weight: .semibold))
                     .foregroundColor(.clayBrown)
             }
+            
+            HStack(spacing: 16) {
+                DetailItem(label: "DIY Time", value: diagnosis.time)
+                DetailItem(label: "Difficulty", value: diagnosis.difficulty)
+                DetailItem(label: "Cost", value: diagnosis.cost)
+            }
+            
+            Text(diagnosis.description)
+                .font(.body)
+                .foregroundColor(.clayBrown.opacity(0.8))
+                .lineSpacing(4)
         }
-        .padding()
-        .background(Color.softWhite)
+        .padding(24)
+        .background(Color.white)
         .cornerRadius(20)
-        .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 4)
-        .padding(.horizontal)
+        .shadow(color: .black.opacity(0.05), radius: 16)
     }
 }
 
-struct InfoBadge: View {
-    let icon: String
-    let text: String
-    let color: Color
+struct DetailItem: View {
+    let label: String
+    let value: String
     
     var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundColor(color)
+        VStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundColor(.clayBrown.opacity(0.7))
             
-            Text(text)
-                .font(.caption)
+            Text(value)
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundColor(.clayBrown)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(color.opacity(0.1))
-        .cornerRadius(15)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(Color.softWhite)
+        .cornerRadius(12)
     }
 }
 
-struct SuccessOverlay: View {
-    @State private var scale = 0.5
-    @State private var opacity = 0.0
+struct StepRow: View {
+    @Binding var step: DIYStep
+    let onToggle: () -> Void
     
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.4)
-                .ignoresSafeArea()
+        HStack(alignment: .top, spacing: 16) {
+            Button(action: onToggle) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(step.isCompleted ? Color.forestGreen : Color.terracotta, lineWidth: 2)
+                        .frame(width: 24, height: 24)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(step.isCompleted ? Color.forestGreen : Color.clear)
+                        )
+                    
+                    if step.isCompleted {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                }
+            }
             
-            VStack(spacing: 30) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 80))
-                    .foregroundColor(.forestGreen)
-                    .scaleEffect(scale)
-                
-                Text("You're all set!")
-                    .font(.friendlyTitle)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(step.title)
+                    .font(.system(size: 16, weight: .medium))
                     .foregroundColor(.clayBrown)
                 
-                Text("Mike will be there tomorrow at 10 AM.\nYou handled that brilliantly!")
-                    .font(.warmBody)
-                    .foregroundColor(.clayBrown.opacity(0.8))
-                    .multilineTextAlignment(.center)
+                Text(step.description)
+                    .font(.system(size: 14))
+                    .foregroundColor(.clayBrown.opacity(0.7))
+                    .fixedSize(horizontal: false, vertical: true)
+                
+                if !step.time.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 12))
+                        Text(step.time)
+                            .font(.system(size: 12))
+                    }
+                    .foregroundColor(.forestGreen)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.forestGreen.opacity(0.1))
+                    .cornerRadius(8)
+                    .padding(.top, 4)
+                }
             }
-            .padding(40)
-            .background(Color.softWhite)
-            .cornerRadius(30)
-            .shadow(radius: 20)
-            .opacity(opacity)
+            
+            Spacer()
         }
-        .onAppear {
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
-                scale = 1.0
-                opacity = 1.0
-            }
-        }
+        .padding(20)
+        .background(Color.white)
+        .cornerRadius(20)
+        .shadow(color: .black.opacity(0.05), radius: 8)
     }
 }
 
-// MARK: - View Model
-class MidnightLeakViewModel: ObservableObject {
-    enum FlowState {
-        case initial
-        case capturingPhoto
-        case diagnosing
-        case showingDiagnosis
-        case choosingAction
-        case connectingContractor
-    }
-    
-    @Published var currentState: FlowState = .initial
-    @Published var capturedImage: UIImage?
-    @Published var diagnosis: String = ""
-    
-    func startEmergencyFlow() {
-        currentState = .capturingPhoto
-    }
-    
-    func analyzeImage(_ image: UIImage) {
-        capturedImage = image
-        currentState = .diagnosing
-        
-        // Simulate AI analysis
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            self.currentState = .showingDiagnosis
-            self.diagnosis = "Supply Line Leak"
-        }
+struct EncouragementCard: View {
+    var body: some View {
+        Text(PredefinedResponses.encouragement)
+            .font(.system(size: 18, weight: .medium))
+            .foregroundColor(.white)
+            .multilineTextAlignment(.center)
+            .padding(20)
+            .frame(maxWidth: .infinity)
+            .background(Color.forestGreen)
+            .cornerRadius(20)
     }
 }
 
 // MARK: - Image Picker
 struct ImagePicker: UIViewControllerRepresentable {
     @Binding var image: UIImage?
-    let sourceType: UIImagePickerController.SourceType
     @Environment(\.presentationMode) var presentationMode
     
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
-        picker.sourceType = sourceType
+        picker.sourceType = .camera
         picker.delegate = context.coordinator
         return picker
     }
@@ -793,4 +864,8 @@ struct ImagePicker: UIViewControllerRepresentable {
             parent.presentationMode.wrappedValue.dismiss()
         }
     }
+}
+
+#Preview {
+    ContentView()
 }
