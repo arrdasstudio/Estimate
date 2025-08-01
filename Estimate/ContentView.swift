@@ -185,7 +185,7 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Screen 1: Initial Greeting
+// MARK: - Screen 1: Enhanced Home Screen
 struct InitialGreetingScreen: View {
     @Binding var messages: [Message]
     @Binding var userInput: String
@@ -195,59 +195,250 @@ struct InitialGreetingScreen: View {
     @FocusState private var isInputFocused: Bool
     @State private var inputText = ""
     @State private var isPulsing = true
+    @State private var selectedSuggestion: String? = nil
+    @State private var showingSuggestions = true
+    
+    private let suggestions = [
+        "💧 Water leak under sink",
+        "💡 Electrical outlet not working", 
+        "🚪 Door won't close properly",
+        "🚿 Low water pressure",
+        "🔥 Heater making strange noise"
+    ]
     
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            VStack(spacing: 8) {
-                Text("👋 Hi Amanda, what's going on at home?")
-                    .font(.title2)
-                    .fontWeight(.medium)
+            // Navigation Bar
+            HStack {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 20))
                     .foregroundColor(.clayBrown)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
+                
+                Spacer()
+                
+                Text("EstiMATE")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(.clayBrown)
+                
+                Spacer()
+                
+                Button(action: {}) {
+                    Image(systemName: "person.circle")
+                        .font(.system(size: 20))
+                        .foregroundColor(.clayBrown)
+                }
             }
-            .padding(.top, 60)
-            .padding(.bottom, 20)
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, 16)
             
-            // Chat container
-            ScrollViewReader { proxy in
-                ScrollView {
+            // Progress Indicator
+            VStack(spacing: 8) {
+                HStack {
+                    Text("Progress")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.clayBrown.opacity(0.7))
+                    
+                    Spacer()
+                    
+                    Text("1 of 6")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.clayBrown.opacity(0.7))
+                }
+                
+                ProgressView(value: 1, total: 6)
+                    .progressViewStyle(LinearProgressViewStyle())
+                    .tint(.terracotta)
+                    .scaleEffect(y: 2)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 24)
+            
+            // Main Content
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Welcome Section
                     VStack(spacing: 16) {
-                        ForEach(messages) { message in
-                            MessageBubble(message: message)
-                                .id(message.id)
+                        Text("👋")
+                            .font(.system(size: 48))
+                        
+                        VStack(spacing: 8) {
+                            Text("Hi Amanda!")
+                                .font(.system(size: 28, weight: .bold))
+                                .foregroundColor(.clayBrown)
+                            
+                            Text("What's happening at home?")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundColor(.clayBrown.opacity(0.8))
+                                .multilineTextAlignment(.center)
+                        }
+                    }
+                    .padding(.top, 20)
+                    
+                    // Smart Suggestions (only show if no messages)
+                    if messages.isEmpty && showingSuggestions {
+                        VStack(alignment: .leading, spacing: 16) {
+                            HStack {
+                                Image(systemName: "lightbulb")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.terracotta)
+                                
+                                Text("Common Issues")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.clayBrown)
+                                
+                                Spacer()
+                            }
+                            
+                            LazyVGrid(columns: [GridItem(.flexible())], spacing: 12) {
+                                ForEach(suggestions, id: \.self) { suggestion in
+                                    Button(action: {
+                                        selectedSuggestion = suggestion
+                                        inputText = String(suggestion.dropFirst(2)) // Remove emoji
+                                        handleSuggestionTap(suggestion)
+                                    }) {
+                                        HStack {
+                                            Text(suggestion)
+                                                .font(.system(size: 15, weight: .medium))
+                                                .foregroundColor(.clayBrown)
+                                            
+                                            Spacer()
+                                            
+                                            Image(systemName: "arrow.right.circle.fill")
+                                                .font(.system(size: 16))
+                                                .foregroundColor(.terracotta)
+                                        }
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 14)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .fill(Color.softWhite)
+                                                .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(selectedSuggestion == suggestion ? Color.terracotta : Color.clear, lineWidth: 2)
+                                        )
+                                    }
+                                    .scaleEffect(selectedSuggestion == suggestion ? 0.98 : 1)
+                                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: selectedSuggestion)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                    
+                    // Chat Messages
+                    if !messages.isEmpty {
+                        VStack(spacing: 16) {
+                            ForEach(messages) { message in
+                                MessageBubble(message: message)
+                                    .id(message.id)
+                            }
+                            
+                            if showTyping {
+                                TypingIndicator()
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                }
+            }
+            
+            Spacer()
+            
+            // Enhanced Input Section
+            VStack(spacing: 16) {
+                // Quick Action Buttons (only show when no conversation started)
+                if messages.isEmpty {
+                    HStack(spacing: 12) {
+                        Button(action: {
+                            // Handle voice input
+                            isRecording.toggle()
+                            if !isRecording {
+                                inputText = "I've got water leaking under my kitchen sink"
+                                isInputFocused = true
+                            }
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "mic.fill")
+                                    .font(.system(size: 16))
+                                Text("Voice")
+                                    .font(.system(size: 14, weight: .medium))
+                            }
+                            .foregroundColor(isRecording ? .white : .terracotta)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .fill(isRecording ? Color.red : Color.terracotta.opacity(0.1))
+                            )
                         }
                         
-                        if showTyping {
-                            TypingIndicator()
+                        Button(action: {
+                            // Handle photo input
+                            currentScreen = 2
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "camera.fill")
+                                    .font(.system(size: 16))
+                                Text("Photo")
+                                    .font(.system(size: 14, weight: .medium))
+                            }
+                            .foregroundColor(.terracotta)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .fill(Color.terracotta.opacity(0.1))
+                            )
                         }
+                        
+                        Spacer()
                     }
-                    .padding()
+                    .padding(.horizontal, 20)
                 }
-                .onChange(of: messages.count) { oldValue, newValue in
-                    withAnimation {
-                        proxy.scrollTo(messages.last?.id, anchor: .bottom)
-                    }
-                }
-            }
-            
-            // Input area
-            VStack(spacing: 0) {
-                Divider()
                 
-                HStack(spacing: 12) {
-                    TextField("Type your message...", text: $inputText)
-                        .textFieldStyle(PlainTextFieldStyle())
+                // Input Field with Floating Label
+                VStack(spacing: 0) {
+                    Divider()
+                        .background(Color.clayBrown.opacity(0.1))
+                    
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            if isInputFocused || !inputText.isEmpty {
+                                Text("Describe your problem")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.terracotta)
+                                    .transition(.opacity)
+                            }
+                            
+                            TextField(isInputFocused || !inputText.isEmpty ? "" : "💬 Describe your problem...", text: $inputText)
+                                .textFieldStyle(PlainTextFieldStyle())
+                                .font(.system(size: 16))
+                                .foregroundColor(.clayBrown)
+                        }
                         .padding(.horizontal, 20)
                         .padding(.vertical, 16)
-                        .background(Color.warmCream)
-                        .cornerRadius(25)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 25)
-                                .stroke(isPulsing ? Color.terracotta.opacity(0.3) : Color.clear, lineWidth: 2)
-                                .scaleEffect(isPulsing ? 1.02 : 1)
-                                .animation(isPulsing ? .easeInOut(duration: 2).repeatForever(autoreverses: true) : .default, value: isPulsing)
+                        .background(
+                            RoundedRectangle(cornerRadius: 24)
+                                .fill(Color.warmCream)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 24)
+                                        .stroke(
+                                            isInputFocused ? Color.terracotta : 
+                                            isPulsing && inputText.isEmpty ? Color.terracotta.opacity(0.3) : Color.clear, 
+                                            lineWidth: 2
+                                        )
+                                        .scaleEffect(isPulsing && inputText.isEmpty && !isInputFocused ? 1.02 : 1)
+                                        .animation(
+                                            isPulsing && inputText.isEmpty && !isInputFocused ? 
+                                            .easeInOut(duration: 2).repeatForever(autoreverses: true) : .default, 
+                                            value: isPulsing
+                                        )
+                                )
                         )
                         .focused($isInputFocused)
                         .onSubmit {
@@ -255,28 +446,39 @@ struct InitialGreetingScreen: View {
                                 handleUserInput(inputText)
                             }
                         }
-                    
-                    Button(action: {
-                        isRecording.toggle()
-                        if !isRecording {
-                            // Simulate voice input
-                            inputText = "I've got water leaking under my kitchen sink"
-                            isInputFocused = true
+                        
+                        // Send Button (appears when typing)
+                        if !inputText.isEmpty {
+                            Button(action: {
+                                if !inputText.isEmpty {
+                                    handleUserInput(inputText)
+                                }
+                            }) {
+                                Image(systemName: "arrow.up.circle.fill")
+                                    .font(.system(size: 32))
+                                    .foregroundColor(.terracotta)
+                            }
+                            .transition(.scale.combined(with: .opacity))
                         }
-                    }) {
-                        Image(systemName: "mic.fill")
-                            .font(.system(size: 20))
-                            .foregroundColor(.white)
-                            .frame(width: 44, height: 44)
-                            .background(isRecording ? Color.red : Color.terracotta)
-                            .clipShape(Circle())
-                            .scaleEffect(isRecording ? 1.1 : 1)
-                            .animation(.easeInOut(duration: 0.3), value: isRecording)
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+                    .background(Color.softWhite)
                 }
-                .padding()
-                .background(Color.white)
             }
+        }
+        .animation(.spring(response: 0.5, dampingFraction: 0.8), value: messages.isEmpty)
+        .animation(.easeInOut(duration: 0.3), value: isInputFocused)
+    }
+    
+    private func handleSuggestionTap(_ suggestion: String) {
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+            showingSuggestions = false
+            selectedSuggestion = suggestion
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            handleUserInput(String(suggestion.dropFirst(2))) // Remove emoji
         }
     }
     
@@ -284,6 +486,10 @@ struct InitialGreetingScreen: View {
         isPulsing = false
         userInput = text
         inputText = ""
+        
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+            showingSuggestions = false
+        }
         
         // Add user message
         messages.append(Message(text: text, isUser: true))
