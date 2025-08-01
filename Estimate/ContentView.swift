@@ -225,7 +225,7 @@ struct InitialGreetingScreen: View {
                     }
                     .padding()
                 }
-                .onChange(of: messages.count) { _ in
+                .onChange(of: messages.count) { oldValue, newValue in
                     withAnimation {
                         proxy.scrollTo(messages.last?.id, anchor: .bottom)
                     }
